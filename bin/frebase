@@ -59,6 +59,6 @@ CLOBBER_MERGE=$(echo "$FREBASE_MSG" \
 
 EMPTY_TREE=$(git hash-object -t tree /dev/null)
 EXCLUDE_MERGE=$(echo "THROW-AWAY EXCLUSION MERGE -- NEVER SEEN" \
-                |git commit-tree ${EMPTY_TREE} ${EXCLUDE_PARENTS})
+                |git commit-tree ${EMPTY_TREE} -p ${UPSTREAM} ${EXCLUDE_PARENTS})
 
 git rebase "$@" --interactive --onto ${CLOBBER_MERGE} ${EXCLUDE_MERGE} ${BRANCH}
