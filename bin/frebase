@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+
+set -e
+
+USAGE="Usage: frebase <upstream> [branch] [... rebase flags / options]"
+# TODO: USAGE="Usage: frebase [<upstream> [branch]] [--frebase-excludes] [... rebase flags / options]"
+
+UPSTREAM=$1; shift
+
+## TODO: mode for list of excludes
+
+if [[ "$UPSTREAM" =~ ^- ]]; then
+   echo "$USAGE" 2>&1
+   exit 1
+fi
+
+if [[ -z "$1" ]] || [[ "$1" =~ ^- ]]; then
+    BRANCH=$(git rev-parse --abbrev-ref HEAD)
+else
+    BRANCH=$1; shift
+fi
+
+# Older messages didn't have ::FREBASE:: prefix to detect. The legacy
+# pattern must be preserved.
+FREBASE_MSG_MATCH="^\\(::FREBASE::\\|Resetting [^ ]\\+ against [^ ]\\+ in preparation for frebase.\\)"
+FREBASE_MSG_PREFIX="::FREBASE::"
+# The FREBASE_MSG_PREFIX must be at the start of the below message but
+# the rest of the mesage can be modified.
+FREBASE_MSG="${FREBASE_MSG_PREFIX} Resetting ${BRANCH} against ${UPSTREAM} in preparation for frebase."
+
+EXCLUDES=""
+EXCLUDE_PARENTS=""
+
+while true; do
+    EXCLUDE=$(git log -1 \
+              --grep="${FREBASE_MSG_MATCH}" \
+              --min-parents=2 \
+              --max-parents=2 \
+              --pretty=format:%H \
+              ${BRANCH} ${UPSTREAM:+^${UPSTREAM}} ${EXCLUDES})
+    if [ -z "$EXCLUDE" ]; then
+        break
+    else
+        # Verify as frebase clobber merge by assuring that the tree of
+        # EXCLUDE and EXCLUDE's 2nd parent are identical
+        if [[ $(git log -1 --pretty=format:%T ${EXCLUDE}) \
+              == $(git log -1 --pretty=format:%T ${EXCLUDE}^2) ]]; then
+            EXCLUDES="${EXCLUDES} ^${EXCLUDE}"
+            EXCLUDE_PARENTS="${EXCLUDE_PARENTS} -p ${EXCLUDE}"
+        else
+            # Strange, EXCLUDE is not actually a frebase, ignore just EXCLUDE
+            EXCLUDES="${EXCLUDES} ${EXCLUDE}^@"
+        fi
+    fi
+done
+
+CLOBBER_MERGE=$(echo "$FREBASE_MSG" \
+                |git commit-tree ${UPSTREAM}: -p ${BRANCH} -p ${UPSTREAM})
+
+EMPTY_TREE=$(git hash-object -t tree /dev/null)
+EXCLUDE_MERGE=$(echo "THROW-AWAY EXCLUSION MERGE -- NEVER SEEN" \
+                |git commit-tree ${EMPTY_TREE} ${EXCLUDE_PARENTS})
+
+git rebase "$@" --interactive --onto ${CLOBBER_MERGE} ${EXCLUDE_MERGE} ${BRANCH}
